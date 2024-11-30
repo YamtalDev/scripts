@@ -1,0 +1,40 @@
+#!/bin/bash
+# Script to create multiple scripts in the ~/scripts directory, make them executable, and open them in VSCode
+
+# Function to create a script and make it executable
+create_script() {
+    local script_name="$1"
+    local script_path="$HOME/scripts/$script_name"
+
+    if [ -f "$script_path" ]; then
+        echo "Error: File '$script_path' already exists."
+        return 1
+    fi
+
+    touch "$script_path" && chmod +x "$script_path"
+}
+
+# Main function to handle the creation of multiple scripts and open them in VSCode
+main() {
+    if [ "$#" -lt 1 ]; then
+        echo "Usage: $0 <script_name1> <script_name2> ..."
+        return 1
+    fi
+
+    local script_paths=()
+
+    for script_name in "$@"; do
+        if create_script "$script_name"; then
+            script_paths+=("$HOME/scripts/$script_name")
+        fi
+    done
+
+    if [ "${#script_paths[@]}" -gt 0 ]; then
+        code "$(dirname "$(realpath "$0")")" && code "${script_paths[@]}"
+    fi
+}
+
+# Ensure the main function is only called if the script is executed directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

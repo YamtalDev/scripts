@@ -1,0 +1,137 @@
+#!/bin/bash
+# Script to interact with git repositories and open corresponding URLs
+
+# Function to check if more than one argument is provided
+check_arguments() {
+    if [ "$#" -gt 1 ]; then
+        echo "Error: Only one argument is allowed."
+        return 1
+    fi
+}
+
+# Function to check if the current directory is a git repository
+check_git_repository() {
+    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+        echo "Error: Not inside a git repository."
+        return 1
+    fi
+}
+
+# Function to get the remote URL
+get_remote_url() {
+    local remote_url
+    remote_url=$(git config --get remote.origin.url)
+    
+    if [ -z "$remote_url" ]; then
+        echo "Error: Could not determine the remote URL."
+        return 1
+    fi
+    
+    echo "$remote_url"
+}
+
+# Function to convert remote URL to a web URL
+convert_remote_url_to_web_url() {
+    local remote_url="$1"
+    local web_url
+
+    if [[ "$remote_url" == git@* ]]; then
+        # SSH URL, convert to HTTPS URL
+        web_url=$(echo "$remote_url" | sed -E 's#git@(.*):(.*)#https://\1/\2#' | sed 's/\.git$//')
+    elif [[ "$remote_url" == https://* ]]; then
+        # HTTPS URL, remove .git suffix
+        web_url=$(echo "$remote_url" | sed 's/\.git$//')
+    else
+        echo "Error: Unsupported remote URL format."
+        return 1
+    fi
+    
+    echo "$web_url"
+}
+
+# Function to get the current branch name
+get_current_branch_name() {
+    local branch_name
+    branch_name=$(git symbolic-ref --short HEAD)
+    
+    if [ -z "$branch_name" ]; then
+        echo "Error: Could not determine the branch name."
+        return 1
+    fi
+    
+    echo "$branch_name"
+}
+
+# Function to get the pull request number
+get_pull_request_number() {
+    local branch_name="$1"
+    local pr_number
+    pr_number=$(gh pr list --json number,headRefName --jq ".[] | select(.headRefName == \"${branch_name}\") | .number")
+    
+    if [ -z "$pr_number" ]; then
+        echo "Error: No open pull request found for the current branch."
+        return 1
+    fi
+    
+    echo "$pr_number"
+}
+
+# Function to open URL in the default browser
+open_url_in_browser() {
+    local web_url="$1"
+    
+    if command -v xdg-open > /dev/null; then
+        xdg-open "$web_url" > /dev/null 2>&1
+    elif command -v open > /dev/null; then
+        open "$web_url" > /dev/null 2>&1
+    else
+        echo "Error: Could not determine how to open the URL in the browser."
+        return 1
+    fi
+}
+
+# Main function to handle the repo functionality
+repo() {
+    check_arguments "$@" || return 1
+    check_git_repository || return 1
+    
+    local remote_url
+    remote_url=$(get_remote_url) || return 1
+    
+    local web_url
+    web_url=$(convert_remote_url_to_web_url "$remote_url") || return 1
+    
+    local branch_name
+    branch_name=$(get_current_branch_name) || return 1
+
+    # Check for --help, --pulls, or --pr argument
+    case "$1" in
+        --help)
+            echo "Usage: repo [--help | --pulls | --pr | <>]"
+            echo
+            echo "Options:"
+            echo "  --help         Show this help message and exit"
+            echo "  --pulls        Open the pull requests page in the browser"
+            echo "  --pr           Open the pull request for the current branch in the browser"
+            echo "  <>             Opens the specific branch in the repositotry"
+            return 0
+            ;;
+        --pulls)
+            web_url="${web_url}/pulls"
+            ;;
+        --pr)
+            local pr_number
+            pr_number=$(get_pull_request_number "$branch_name") || return 1
+            web_url="${web_url}/pull/${pr_number}"
+            ;;
+        *)
+            web_url="${web_url}/tree/${branch_name}"
+            ;;
+    esac
+
+    open_url_in_browser "$web_url" || return 1
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    repo "$@"
+fi

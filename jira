@@ -1,0 +1,135 @@
+#!/bin/bash
+# Script to open Jira in the browser and validate ticket numbers using the Jira REST API
+
+scripts_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$scripts_path"/.credentials ]; then
+    # shellcheck disable=SC1091
+    source "$scripts_path"/.credentials
+fi
+
+# Function to open a URL in the default browser
+open_url() {
+    local url="$1"
+    (nohup xdg-open "$url" > /dev/null 2>&1 &)
+}
+
+# Function to check if a Jira ticket exists using the Jira REST API
+is_valid_ticket() {
+    local response
+    local ticket_number="$1"
+    local api_url="https://sqream.atlassian.net/rest/api/2/issue/${ticket_number}"
+    response=$(curl --silent --write-out "%{http_code}" --output /dev/null -u "$WORK_EMAIL:$JIRA_API_TOKEN" "$api_url")
+
+    if [ "$response" -eq 200 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to handle no arguments case
+handle_no_arguments() {
+    local base_url="$1"
+    local jira_url="${base_url}/issues/?filter=-1"
+    open_url "$jira_url"
+}
+
+# Function to handle --board argument
+handle_board_argument() {
+    local base_url="$1"
+    local jira_url="${base_url}/jira/software/c/projects/SQ/boards/160"
+    open_url "$jira_url"
+}
+
+# Function to handle ticket argument
+handle_ticket_argument() {
+    local base_url="$1"
+    local ticket_number="$2"
+    local jira_url="${base_url}/issues/${ticket_number}?filter=-1"
+    
+    if is_valid_ticket "$ticket_number"; then
+        open_url "$jira_url"
+    else
+        echo "Error: Invalid ticket ${ticket_number}."
+        return 1
+    fi
+}
+
+# Function to handle current directory Git branch ticket extraction
+handle_current_directory() {
+    local base_url="$1"
+    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+        echo "Error: Not inside a git repository."
+        return 1
+    fi
+
+    local branch_name
+    branch_name=$(git symbolic-ref --short HEAD)
+
+    # Extract ticket numbers from branch name
+    local ticket_number
+    ticket_number=$(echo "$branch_name" | grep -Eo '([sS][qQ]|[dD][iI])[-_]?[0-9]+' | head -n 1 | tr '[:lower:]' '[:upper:]' | sed -E 's/[-_]?([0-9]+)/-\1/')
+
+    if [ -z "$ticket_number" ]; then
+        echo "Error: No valid ticket number found in branch name."
+        return 1
+    fi
+
+    local jira_url="${base_url}/issues/${ticket_number}?filter=-1"
+    if is_valid_ticket "$ticket_number"; then
+        open_url "$jira_url"
+    else
+        echo "Error: Invalid ticket ${ticket_number}."
+        return 1
+    fi
+}
+
+show_help() {
+    echo "Usage: jira [--help | --board | <ticket-number> | . | <>]"
+    echo
+    echo "Options:"
+    echo "  --help          Show this help message and exit"
+    echo "  --board         Open the Jira board in the browser"
+    echo "  <ticket-number> Open the specified Jira ticket in the browser"
+    echo "  .               Open the Jira ticket extracted from the current Git branch name"
+    echo "  <>              Opens your open issues in the browser"
+}
+
+# Main function to determine which Jira URL to open
+jira() {
+    local base_url="https://sqream.atlassian.net"
+
+    if [ "$#" -gt 1 ]; then
+        show_help
+        return 1
+    fi
+
+    if [ -z "$1" ]; then
+        handle_no_arguments "$base_url"
+    else
+        case "$1" in
+            --board)
+                handle_board_argument "$base_url"
+                ;;
+            .)
+                handle_current_directory "$base_url"
+                ;;
+            --help)
+                show_help
+                return 0
+                ;;
+            *)
+                handle_ticket_argument "$base_url" "$1"
+                ;;
+        esac
+    fi
+}
+
+# Main function to call the jira function with provided arguments
+main() {
+    jira "$@"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

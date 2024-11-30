@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# ~/.talarc
+
+# Check if the /usr/local/bin/scripts directory exists
+if [ ! -d /usr/local/bin/scripts ]; then
+    # Create a symbolic link from ~/scripts to /usr/local/bin/scripts
+    sudo ln -s ~/scripts /usr/local/bin/scripts
+fi
+
+# Source the aliases file
+if [ -f /usr/local/bin/scripts/aliases.sh ]; then
+    # shellcheck disable=SC1091
+    source /usr/local/bin/scripts/aliases.sh
+fi
+
+# Add scripts directory to PATH for fast lookup
+export PATH="s:$PATH"
+# shellcheck disable=SC1090
+eval "$(zoxide init zsh)"

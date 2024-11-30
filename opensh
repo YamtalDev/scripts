@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Script to open files in the ~/scripts directory using VSCode
+scripts_directory="$(dirname "$(realpath "$0")")"
+
+
+# Function to open files in VSCode if they exist
+opensh() {
+    if [ "$#" -lt 1 ]; then
+        echo "Error: No file names provided. Usage: opensh <path1> <path12> ..."
+        return 1
+    fi
+
+    # Check if the first argument is "."
+    if [ "$1" == "." ]; then
+        code "$scripts_directory"
+        return 0
+    fi
+
+    local script_paths=()
+
+    for script_name in "$@"; do
+        local script_path="$HOME/scripts/$script_name"
+
+        if [ ! -f "$script_path" ]; then
+            echo "Error: File '$script_path' does not exist."
+            continue
+        fi
+
+        script_paths+=("$script_path")
+    done
+
+    if [ "${#script_paths[@]}" -gt 0 ]; then
+        code "$scripts_directory" && code "${script_paths[@]}"
+    else
+        echo "No valid files to open."
+    fi
+}
+
+# Main function to handle the opensh functionality
+main() {
+    opensh "$@"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

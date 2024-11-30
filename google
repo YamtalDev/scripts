@@ -1,0 +1,41 @@
+#!/bin/bash
+# Script to open Google Chrome or search for a term
+
+# Function to open Google Chrome or search for a term
+google() {
+    # Check if more than one parameter is provided
+    if [ "$#" -gt 1 ]; then
+        echo "Error: Only one search term is allowed."
+        return 1
+    fi
+
+    # Check if a parameter is provided
+    if [ -z "$1" ]; then
+        # No parameter, open Chrome
+        if pgrep -x "chrome" > /dev/null; then
+            (nohup google-chrome --new-tab "http://www.google.com" > /dev/null 2>&1 &)
+        else
+            (nohup google-chrome "http://www.google.com" > /dev/null 2>&1 &)
+        fi
+    else
+        # Parameter provided, search for the term
+        local search_term="$1"
+        search_term="${search_term// /+}"
+        local search_url
+        search_url="https://www.google.com/search?q=$search_term"
+        if pgrep -x "chrome" > /dev/null; then
+            (nohup google-chrome --new-tab "$search_url" > /dev/null 2>&1 &)
+        else
+            (nohup google-chrome "$search_url" > /dev/null 2>&1 &)
+        fi
+    fi
+}
+
+# Main function to call the google function with provided arguments
+main() {
+    google "$@"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

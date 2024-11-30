@@ -1,0 +1,108 @@
+#!/bin/bash
+
+REMOTERDP_CONFIG="$HOME/.local/share/remmina/group_rdp_sqream_192-168-4-89.remmina"
+REMOTERDP_COMMAND="remmina -c $REMOTERDP_CONFIG"
+
+# Function to print error messages
+error() {
+    echo "Error: $1" >&2
+    exit 1
+}
+
+# Function to check if the VPN process is alive
+is_vpn_connected() {
+    if [[ "$(iwgetid -r)" == "SQNET" ]] || pgrep -x "openfortivpn" > /dev/null; then
+        return 0  # VPN is connected
+    else
+        return 1  # VPN is not connected
+    fi
+}
+
+# Function to check if there is an active network connection
+is_network_connected() {
+    if nmcli -t -f STATE general | grep -q "connected"; then
+        return 0  # Network is connected
+    else
+        return 1  # Network is not connected
+    fi
+}
+
+# Function to connect using Remmina
+connect_remmina() {
+    (nohup $REMOTERDP_COMMAND > /dev/null 2>&1 &) &>/dev/null
+}
+
+# Function to disconnect Remmina (force kill)
+disconnect_remmina() {
+    pkill remmina || error "Remmina is not running."
+}
+
+# Function to check if Remmina is running
+check_remmina() {
+    if pgrep -x "remmina" > /dev/null; then
+        echo "RDP is connected."
+    else
+        echo "RDP is disconnected."
+    fi
+}
+
+# Function to edit the Remmina configuration
+edit_config() {
+    vim "$REMOTERDP_CONFIG"
+}
+
+# Function to display help information
+show_help() {
+    echo "Usage: $0 [--connect|--disconnect|--check|--config]"
+    echo ""
+    echo "Options:"
+    echo "  --connect     Connect using Remmina with the specified configuration."
+    echo "  --disconnect  Disconnect Remmina (force kill)."
+    echo "  --check       Check if Remmina is running."
+    echo "  --config      Edit the Remmina configuration file."
+    echo "  --help        Display this help message."
+}
+
+# Main function
+main() {
+    if [ "$#" -lt 1 ]; then
+        show_help
+        exit 1
+    fi
+
+    case "$1" in
+        --connect)
+            # Check if internet is connected
+            if ! is_network_connected; then
+                error "No active internet connection."
+            fi
+
+            # Check if a VPN connection is already established
+            if ! is_vpn_connected; then
+                error "VPN connection is required for RDP connection."
+            fi
+
+            connect_remmina
+            ;;
+        --disconnect)
+            disconnect_remmina
+            ;;
+        --check)
+            check_remmina
+            ;;
+        --config)
+            edit_config
+            ;;
+        --help)
+            show_help
+            ;;
+        *)
+            error "Invalid argument."
+            show_help
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

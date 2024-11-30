@@ -1,0 +1,227 @@
+#!/bin/bash
+
+scripts_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$scripts_path/.devices" ]; then
+    # shellcheck disable=SC1091
+    source "$scripts_path/.devices"
+fi
+
+# Function to print error messages
+error() {
+    echo "Error: $1" >&2
+    exit 1
+}
+
+# Function to execute bluetoothctl commands with suppressed output
+bluetoothctl_cmd() {
+    echo -e "$1" | bluetoothctl > /dev/null 2>&1 || error "Failed to execute bluetoothctl command: $1"
+}
+
+# Function to ensure Bluetooth is unblocked and powered on
+ensure_bluetooth_on() {
+    rfkill unblock bluetooth
+    bluetoothctl_cmd "power on"
+    sleep 4
+}
+
+# Function to enable agent
+enable_agent() {
+    bluetoothctl_cmd "agent on"
+}
+
+# Function to set as default agent
+set_default_agent() {
+    bluetoothctl_cmd "default-agent"
+}
+
+# Function to get the device name from its MAC address
+get_device_name() {
+    local mac_address="$1"
+    bluetoothctl info "$mac_address" | grep "Name" | awk -F 'Name: ' '{print $2}'
+}
+
+# Function to check if the device is connected
+is_device_connected() {
+    local mac_address="$1"
+    bluetoothctl info "$mac_address" | grep -q "Connected: yes"
+}
+
+# Function to check if the device is connected
+check_device_connection() {
+    local mac_address="$1"
+    local device_name="$2"
+    if ! bluetoothctl devices | grep -q "$mac_address"; then
+        error "$device_name not found or not connected"
+    fi
+}
+
+# Function to switch the Bluetooth profile to HSP/HFP with suppressed output
+switch_to_hsp() {
+    local card_name
+    card_name="bluez_card.$(echo "$1" | tr ':' '_')"
+    if pacmd list-cards | grep -A50 "name: <$card_name>" | grep -q "headset_head_unit"; then
+        pacmd set-card-profile "$card_name" headset_head_unit > /dev/null 2>&1 || error "Failed to set profile to headset_head_unit"
+    elif pacmd list-cards | grep -A50 "name: <$card_name>" | grep -q "handsfree_head_unit"; then
+        pacmd set-card-profile "$card_name" handsfree_head_unit > /dev/null 2>&1 || error "Failed to set profile to handsfree_head_unit"
+    else
+        error "No HSP/HFP profile found"
+    fi
+}
+
+# Function to set the default input source with suppressed output
+set_default_input_source() {
+    local source_name
+    source_name="bluez_source.$(echo "$1" | tr ':' '_')"
+    if ! pacmd set-default-source "$source_name" > /dev/null 2>&1; then
+        error "Failed to set default source to $source_name"
+    fi
+    echo "Default input source set to $source_name" > /dev/null 2>&1
+}
+
+# Function to switch the Bluetooth profile to A2DP with suppressed output
+switch_to_a2dp() {
+    local card_name
+    card_name="bluez_card.$(echo "$1" | tr ':' '_')"
+    if ! pacmd set-card-profile "$card_name" a2dp_sink > /dev/null 2>&1; then
+        error "Failed to set profile to a2dp_sink"
+    fi
+    echo "Switched profile to a2dp_sink" > /dev/null 2>&1
+}
+
+# Function to manage earphone microphone
+connect_earphone_microphone() {
+    local mac_address="$1"
+    local device_name="$2"
+    check_device_connection "$mac_address" "$device_name"
+    switch_to_hsp "$mac_address"
+    set_default_input_source "$mac_address"
+}
+
+# Function to manage Bluetooth devices
+manage_device() {
+    local action="$1"
+    local device_type="$2"
+    local attribute="$3"
+    local mac_var="${device_type^^}_DEVICE_MAC" # Converts device_type to uppercase and appends _DEVICE_MAC
+    local device_name
+    device_name=$(get_device_name "${!mac_var}")
+
+    if [ -z "${!mac_var}" ]; then
+        error "Unknown device type: $device_type"
+    fi
+
+    case "$action" in
+        connect)
+            connect_device "${!mac_var}" "$device_name" "$device_type" "$attribute"
+            ;;
+        disconnect)
+            disconnect_device "${!mac_var}" "$device_name" "$device_type" "$attribute"
+            ;;
+        check)
+            check_device "${!mac_var}" "$device_name"
+            ;;
+        *)
+            error "Unknown action: $action"
+            ;;
+    esac
+}
+
+# Function to connect Bluetooth devices
+connect_device() {
+    local mac_address="$1"
+    local device_name="$2"
+    local device_type="$3"
+    local attribute="$4"
+
+    if is_device_connected "$mac_address"; then
+        if [ "$device_type" = "earphones" ] && [ "$attribute" = "mic" ]; then
+            connect_earphone_microphone "$mac_address" "$device_name"
+        else
+            echo "$device_name is already connected"
+        fi
+    else
+        bluetoothctl_cmd "connect $mac_address"
+        sleep 3
+        if is_device_connected "$mac_address"; then
+            if [ "$device_type" = "earphones" ] && [ "$attribute" = "mic" ]; then
+                connect_earphone_microphone "$mac_address" "$device_name"
+            fi
+        else
+            error "Failed to connect to $device_name"
+        fi
+    fi
+}
+
+# Function to disconnect Bluetooth devices
+disconnect_device() {
+    local mac_address="$1"
+    local device_name="$2"
+    local device_type="$3"
+    local attribute="$4"
+
+    if ! is_device_connected "$mac_address"; then
+        error "$device_name is not connected"
+    else
+        if [ "$device_type" = "earphones" ] && [ "$attribute" = "mic" ]; then
+            switch_to_a2dp "$mac_address"
+        else
+            bluetoothctl_cmd "disconnect $mac_address"
+            sleep 1
+        fi
+    fi
+}
+
+# Function to check the status of Bluetooth devices
+check_device() {
+    local mac_address="$1"
+    local device_name="$2"
+
+    if is_device_connected "$mac_address"; then
+        echo "$device_name is connected"
+    else
+        echo "$device_name is not connected"
+    fi
+}
+
+# Function to display help information
+show_help() {
+    echo "Usage: "
+    echo "$0 --connect|--disconnect|--check [earphones|mouse|keyboard] [mic]"
+    echo "$0 --config"
+    echo "$0 --help"
+}
+
+# Function to edit the .devices file
+edit_config() {
+    vim "$scripts_path/.devices"
+}
+
+# Main function
+main() {
+    if [ "$#" -lt 2 ]; then
+        show_help
+        exit 1
+    fi
+
+    local action="${1#--}" # Remove leading '--'
+    local device_type="$2"
+    local attribute="$3"
+
+    if [[ "$action" =~ ^(connect|disconnect|check)$ ]]; then
+        ensure_bluetooth_on
+        enable_agent
+        set_default_agent
+        manage_device "$action" "$device_type" "$attribute"
+    elif [ "$action" = "config" ]; then
+        edit_config
+    elif [ "$action" = "help" ]; then
+        show_help
+    else
+        show_help
+        exit 1
+    fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

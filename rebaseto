@@ -1,0 +1,103 @@
+#!/bin/bash
+# Script to rebase the current branch onto a specified base branch
+
+# Function to check if exactly one argument is provided
+check_argument_count() {
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: rebaseto <base_branch>"
+        return 1
+    fi
+}
+
+# Function to check if the current directory is a git repository
+check_git_repository() {
+    if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+        echo "Error: Not inside a git repository."
+        return 1
+    fi
+}
+
+# Function to get the current branch name
+get_current_branch_name() {
+    local branch_name
+    branch_name=$(git symbolic-ref --short HEAD)
+    
+    if [ -z "$branch_name" ]; then
+        echo "Error: Not on any branch."
+        return 1
+    fi
+    
+    echo "$branch_name"
+}
+
+# Function to prevent rebasing to the same branch
+prevent_rebase_to_same_branch() {
+    local current_branch="$1"
+    local base_branch="$2"
+
+    if [ "$current_branch" = "$base_branch" ]; then
+        echo "Error: Cannot rebase to the same branch."
+        return 1
+    fi
+}
+
+# Function to fetch updates
+fetch_updates() {
+    if ! output=$(git fetch 2>&1); then
+        echo "Error: Could not fetch updates."
+        echo "$output"
+        return 1
+    fi
+}
+
+# Function to checkout a branch
+checkout_branch() {
+    local branch="$1"
+    if ! output=$(git checkout "$branch" 2>&1); then
+        echo "Error: Could not checkout to branch $branch."
+        echo "$output"
+        return 1
+    fi
+}
+
+# Function to pull updates on the current branch
+pull_updates() {
+    if ! output=$(git pull 2>&1); then
+        echo "Error: Could not pull updates."
+        echo "$output"
+        return 1
+    fi
+}
+
+# Function to rebase the current branch onto the base branch
+rebase_current_branch() {
+    local current_branch="$1"
+    local base_branch="$2"
+    git rebase "origin/$base_branch"
+}
+
+# Main function to handle the rebaseto functionality
+rebaseto() {
+    check_argument_count "$@" || return 1
+    check_git_repository || return 1
+
+    local base_branch="$1"
+    local current_branch
+    current_branch=$(get_current_branch_name) || return 1
+
+    prevent_rebase_to_same_branch "$current_branch" "$base_branch" || return 1
+
+    fetch_updates || return 1
+    checkout_branch "$base_branch" || return 1
+    pull_updates || {
+        checkout_branch "$current_branch" > /dev/null 2>&1
+        return 1
+    }
+
+    checkout_branch "$current_branch" || return 1
+    rebase_current_branch "$current_branch" "$base_branch" || return 1
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    rebaseto "$@"
+fi

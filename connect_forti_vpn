@@ -1,0 +1,166 @@
+#!/bin/bash
+
+CONFIG_FILE="/etc/openfortivpn/config"
+LOG_FILE="/tmp/openfortivpn.log"
+
+# Function to check if the config file exists
+is_config_file_exists() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "Error: Configuration file not found at $CONFIG_FILE"
+        return 1
+    fi
+    return 0
+}
+
+# Function to edit the configuration file
+edit_config() {
+    if is_config_file_exists; then
+        sudo vim "$CONFIG_FILE"
+    else
+        exit 1
+    fi
+}
+
+# Function to ensure sudo authentication
+ensure_sudo() {
+    if ! sudo -n true 2>/dev/null; then
+        echo "Sudo authentication required."
+        sudo -v
+    fi
+}
+
+# Function to run openfortivpn and handle 2FA
+run_vpn() {
+    local token="$1"
+
+    # Ensure sudo is authenticated
+    ensure_sudo
+
+    # Check if openfortivpn is installed
+    if ! command -v openfortivpn &> /dev/null; then
+        echo "Error: openfortivpn is not installed. Please install it first."
+        exit 1
+    fi
+
+    # Check if the config file exists
+    if ! is_config_file_exists; then
+        exit 1
+    fi
+
+    # Check if a VPN connection is already established
+    if is_vpn_connected; then
+        echo "A VPN session is already connected."
+        exit 1
+    fi
+
+    # Prompt for the 2FA token if not provided as an argument
+    if [ -z "$token" ]; then
+        read -r -p "Enter 2FA token: " token
+    fi
+
+    # Validate the 2FA token
+    if [[ ! "$token" =~ ^[0-9]{6}$ ]]; then
+        echo "Error: The 2FA token must be 6 digits."
+        exit 1
+    fi
+
+    # Run openfortivpn with the 2FA token and capture output in a log file
+    {
+        sudo openfortivpn --otp="$token" | sudo tee "$LOG_FILE" > /dev/null 2>&1 &
+        disown
+    } > /dev/null 2>&1
+
+    # Wait for a short period to see if there are any immediate errors
+    sleep 1
+
+    # Check if the process is still running
+    if ! pgrep -x "openfortivpn" > /dev/null; then
+        echo "Error: Failed to connect to VPN. Details:"
+        cat "$LOG_FILE"
+        exit 1
+    fi
+
+    echo "VPN connection established."
+}
+
+# Function to check if the VPN process is alive
+is_vpn_connected() {
+    if [[ "$(iwgetid -r)" == "SQNET" ]] || pgrep -x "openfortivpn" > /dev/null; then
+        return 0  # VPN is connected
+    else
+        return 1  # VPN is not connected
+    fi
+}
+
+# Function to check the VPN connection
+check_vpn() {
+    if is_vpn_connected; then
+        echo "VPN connected."
+    else
+        echo "VPN disconnected."
+    fi
+}
+
+# Function to disconnect the VPN
+disconnect_vpn() {
+    if is_vpn_connected; then
+        sudo pkill openfortivpn > /dev/null 2>&1
+        echo "VPN session disconnected."
+    else
+        echo "No active VPN session found."
+    fi
+}
+
+# Function to display help information
+show_help() {
+    echo "Usage: $0 [OPTION]"
+    echo ""
+    echo "Options:"
+    echo "  --config         Edit the VPN configuration file"
+    echo "  --token=<TOKEN>  Connect to the VPN using the provided 2FA token"
+    echo "  --check          Check if the VPN is connected"
+    echo "  --disconnect     Disconnect the VPN"
+    echo "  --help           Display this help message"
+}
+
+main() {
+    # Ensure sudo is authenticated at the beginning
+    ensure_sudo
+
+    # Check the number of arguments
+    if [ "$#" -gt 1 ]; then
+        echo "Error: Too many arguments. Only one argument is allowed."
+        show_help
+        exit 1
+    fi
+
+    # Process the argument using a case statement
+    case "$1" in
+        --config)
+            edit_config
+            ;;
+        --token=*)
+            token="${1#--token=}"
+            run_vpn "$token"
+            ;;
+        --check)
+            check_vpn
+            ;;
+        --disconnect)
+            disconnect_vpn
+            ;;
+        --help)
+            show_help
+            ;;
+        *)
+            echo "Error: Invalid argument."
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# If the script is executed, not sourced, run the main function
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

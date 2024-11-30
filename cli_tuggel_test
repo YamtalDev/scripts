@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Define the terminal application and class
+TERMINAL="warp-terminal"
+TERMINAL_CLASS="dev.warp.Warp"
+PREV_WINDOW_FILE="/tmp/prev_window_id"
+
+# Function to check if wmctrl is installed
+function check_wmctrl_installed {
+    if ! command -v wmctrl &> /dev/null; then
+        echo "Error: wmctrl is not installed. Please install it using 'sudo apt-get install wmctrl'."
+        exit 1
+    fi
+}
+
+# Function to get the currently focused window
+function get_focused_window {
+    xdotool getwindowfocus
+}
+
+# Function to get the most recent terminal window
+function get_most_recent_terminal {
+    wmctrl -lx | grep -i "$TERMINAL_CLASS" | tail -n 1 | awk '{print $1}'
+}
+
+# Function to focus on the terminal window
+function focus_terminal {
+    local window_id=$1
+    wmctrl -ia "$window_id" > /dev/null 2>&1
+}
+
+# Function to open a new terminal window
+function open_terminal {
+    $TERMINAL > /dev/null 2>&1 &
+}
+
+# Main function to toggle terminal
+function main {
+    check_wmctrl_installed
+
+    local focused_window=$(get_focused_window)
+
+    if [[ -f "$PREV_WINDOW_FILE" ]]; then
+        local prev_window_id=$(cat "$PREV_WINDOW_FILE")
+    else
+        local prev_window_id=""
+    fi
+
+    local terminal_window_id=$(get_most_recent_terminal)
+
+    if [[ -n "$terminal_window_id" && "$focused_window" == "$terminal_window_id" ]]; then
+        # Terminal is currently focused, switch back to the previous window
+        if [[ -n "$prev_window_id" ]]; then
+            wmctrl -ia "$prev_window_id" > /dev/null 2>&1
+            rm -f "$PREV_WINDOW_FILE"
+        fi
+    else
+        # Terminal is not focused, switch to the terminal window
+        if [[ "$focused_window" != "$prev_window_id" ]]; then
+            echo "$focused_window" > "$PREV_WINDOW_FILE"
+        fi
+        if [[ -n "$terminal_window_id" ]]; then
+            focus_terminal "$terminal_window_id"
+        else
+            open_terminal
+        fi
+    fi
+}
+
+# Call the main function if the script is executed directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

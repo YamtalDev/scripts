@@ -1,0 +1,225 @@
+#!/bin/bash
+
+scripts_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+VPN_SCRIPT="$scripts_path/connect_forti_vpn"
+BLUETOOTH_SCRIPT="$scripts_path/connect_bluetooth_device"
+REMOTE_MACHINE_RDP_CONECTION_SCRIPT="$scripts_path/rpc"
+# Function to print error messages
+error() {
+    echo "Error: $1" >&2
+    exit 1
+}
+
+# Function to display help information for station
+show_help() {
+    echo "Usage: $0 [connect|disconnect|config|check] [vpn|keyboard|mouse|earphones|all] [attribute]"
+    echo ""
+    echo "Options:"
+    echo "  connect vpn          Connect to the VPN"
+    echo "  disconnect vpn       Disconnect the VPN"
+    echo "  config vpn           Edit the VPN configuration file"
+    echo "  check vpn            Check if the VPN is connected"
+    echo "  connect keyboard     Connect to the keyboard"
+    echo "  disconnect keyboard  Disconnect from the keyboard"
+    echo "  check keyboard       Check if the keyboard is connected"
+    echo "  connect mouse        Connect to the mouse"
+    echo "  disconnect mouse     Disconnect from the mouse"
+    echo "  check mouse          Check if the mouse is connected"
+    echo "  connect earphones    Connect to the earphones"
+    echo "  disconnect earphones Disconnect from the earphones"
+    echo "  check earphones      Check if the earphones are connected"
+    echo "  connect remote       Connect to the remote server"
+    echo "  disconnect remote    Disconnect from the remote server"
+    echo "  config remote        Configure the remote server rdp conection"
+    echo "  check remote         Check if the remote server is connected"
+    echo "  connect all          Connect to all devices"
+    echo "  disconnect all       Disconnect from all devices"
+    echo "  check all            Check if all devices are connected"
+    echo "  --help               Display this help message"
+}
+
+# Function to ensure sudo authentication
+ensure_sudo() {
+    if ! sudo -n true 2>/dev/null; then
+        echo "Sudo authentication required."
+        sudo -v
+    fi
+}
+
+# Function to check if the VPN process is alive
+is_vpn_connected() {
+    if [[ "$(iwgetid -r)" == "SQNET" ]] || pgrep -x "openfortivpn" > /dev/null; then
+        return 0  # VPN is connected
+    else
+        return 1  # VPN is not connected
+    fi
+}
+
+# Function to check if there is an active network connection
+is_network_connected() {
+    if nmcli -t -f STATE general | grep -q "connected"; then
+        return 0  # Network is connected
+    else
+        return 1  # Network is not connected
+    fi
+}
+
+handle_remote_machine_rdp_connection() {
+    local action="$1"
+    shift
+
+    case "$action" in
+        connect)
+            "$REMOTE_MACHINE_RDP_CONECTION_SCRIPT" --connect
+            ;;
+        disconnect)
+            "$REMOTE_MACHINE_RDP_CONECTION_SCRIPT" --disconnect
+            ;;
+        config)
+            "$REMOTE_MACHINE_RDP_CONECTION_SCRIPT" --config
+            ;;
+        check)
+            "$REMOTE_MACHINE_RDP_CONECTION_SCRIPT" --check
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Function to handle VPN commands
+handle_vpn() {
+    local action="$1"
+    shift
+
+    # Ensure sudo is authenticated at the beginning
+    ensure_sudo
+
+    case "$action" in
+        connect)
+            # Check if a VPN connection is already established
+            if is_vpn_connected; then
+                echo "A VPN session is already connected."
+                exit 1
+            fi
+
+            # Check if internet is connected
+            if ! is_network_connected; then
+                error "No active internet connection."
+            fi
+
+            if ! read -r -t 60 -p "Enter the VPN 2FA token: " token; then
+                error "Timed out waiting for VPN 2FA token input"
+            fi
+            "$VPN_SCRIPT" --token="$token"
+            ;;
+        disconnect)
+            "$VPN_SCRIPT" --disconnect
+            ;;
+        config)
+            "$VPN_SCRIPT" --config
+            ;;
+        check)
+            "$VPN_SCRIPT" --check
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Function to handle Bluetooth device commands
+handle_bluetooth_device() {
+    local action="$1"
+    local device="$2"
+    local attribute="$3"
+    shift 3
+
+    case "$action" in
+        connect)
+            if [ "$device" = "all" ]; then
+                "$BLUETOOTH_SCRIPT" --connect earphones
+                "$BLUETOOTH_SCRIPT" --connect mouse
+                "$BLUETOOTH_SCRIPT" --connect keyboard
+            else
+                "$BLUETOOTH_SCRIPT" --connect "$device" "$attribute"
+            fi
+            ;;
+        disconnect)
+            if [ "$device" = "all" ]; then
+                "$BLUETOOTH_SCRIPT" --disconnect earphones
+                "$BLUETOOTH_SCRIPT" --disconnect mouse
+                "$BLUETOOTH_SCRIPT" --disconnect keyboard
+            else
+                "$BLUETOOTH_SCRIPT" --disconnect "$device" "$attribute"
+            fi
+            ;;
+        check)
+            if [ "$device" = "all" ]; then
+                "$BLUETOOTH_SCRIPT" --check earphones
+                "$BLUETOOTH_SCRIPT" --check mouse
+                "$BLUETOOTH_SCRIPT" --check keyboard
+            else
+                "$BLUETOOTH_SCRIPT" --check "$device"
+            fi
+            ;;
+        config)
+            "$BLUETOOTH_SCRIPT" --config "$@"
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Main function
+main() {
+    if [ "$#" -lt 2 ]; then
+        show_help
+        exit 1
+    fi
+
+    local action="$1"
+    local target="$2"
+    local attribute="$3"
+
+    case "$action" in
+        connect|disconnect|config|check)
+            if [ "$#" -lt 2 ]; then
+                show_help
+                exit 1
+            fi
+
+            case "$target" in
+                vpn)
+                    handle_vpn "$action" "$@"
+                    ;;
+                keyboard|mouse|earphones|all)
+                    handle_bluetooth_device "$action" "$target" "$attribute" "$@"
+                    ;;
+                rdp)
+                    handle_remote_machine_rdp_connection "$action" "$@"
+                    ;;
+                *)
+                    show_help
+                    exit 1
+                    ;;
+            esac
+            ;;
+        --help)
+            show_help
+            ;;
+        *)
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
