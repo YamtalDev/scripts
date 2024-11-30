@@ -1,0 +1,14 @@
+[alias]
+	co = checkout
+	br = branch
+	rmbr = branch -D
+	com = commit -m
+	s = status
+	last = log -1 HEAD
+[pull]
+	rebase = true
+[core]
+	excludesfile = /home/talas/.gitignore
+[user]
+	email = tal.aharon.work@gmail.com
+	name = YamtalDev
